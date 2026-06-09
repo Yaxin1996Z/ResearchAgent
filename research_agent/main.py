@@ -100,6 +100,7 @@ def run_research(topic: str, output_dir: str = "") -> str:
     crew = Crew(
         agents=[planner, researcher, writer, reviewer],
         tasks=tasks,
+        memory=memory,
     )
 
     print(f"\n{'='*60}")

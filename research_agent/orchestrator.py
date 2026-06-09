@@ -102,25 +102,48 @@ class Task:
 class Crew:
     """任务调度器"""
 
-    def __init__(self, agents: list[Agent], tasks: list[Task]):
+    def __init__(self, agents: list[Agent], tasks: list[Task], memory=None):
         self.agents = agents
         self.tasks = tasks
+        self.memory = memory
         self._context = ""
 
     def kickoff(self) -> str:
         """顺序执行所有任务，前一个输出传给后一个"""
-        print(f"\n  🚀 启动 {len(self.agents)} 个 Agent，{len(self.tasks)} 个任务\n")
+        print(f"\n  \U0001f680 启动 {len(self.agents)} 个 Agent，{len(self.tasks)} 个任务\n")
 
         for agent in self.agents:
-            print(f"    👤 {agent.role}")
+            print(f"    \U0001f464 {agent.role}")
         print()
 
         final = ""
         for i, task in enumerate(self.tasks):
-            print(f"  📋 任务 {i+1}: {task.description[:50]}...")
+            print(f"  \U0001f4cb 任务 {i+1}: {task.description[:50]}...")
             output = task.execute(context=self._context)
             print(f"  ✅ 完成 ({len(output)} 字)")
+
+            # 研究员任务完成后，将研究成果提取到记忆中
+            if self.memory and "研究" in task.agent.role and i >= 1:
+                self._extract_findings(output)
+
             self._context = output
             final = output
 
         return final
+
+    def _extract_findings(self, text: str):
+        """从研究成果中提取关键发现，存入记忆"""
+        # 用 LLM 提取 3-5 条关键发现
+        from . import llm
+        prompt = (
+            "从以下调研结果中提取 3-5 条最关键的发现，每条一句话，用 - 开头：\n\n"
+            f"{text[:3000]}\n\n关键发现："
+        )
+        result = llm.call(prompt, "你是一个结构化提取专家。")
+        count = 0
+        for line in result.split("\n"):
+            line = line.strip().strip("- *").strip()
+            if line and len(line) > 5:
+                self.memory.add_finding(line)
+                count += 1
+        print(f"    [记忆] 提取 {count} 条关键发现")
