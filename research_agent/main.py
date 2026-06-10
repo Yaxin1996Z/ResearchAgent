@@ -8,13 +8,15 @@ ResearchAgent CLI —— 多 Agent 研究助手
 """
 
 import sys
-import io
 import argparse
 import os
 from datetime import datetime
 
 # Windows 终端 UTF-8 支持
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+except Exception:
+    pass
 
 from dotenv import load_dotenv
 load_dotenv()
