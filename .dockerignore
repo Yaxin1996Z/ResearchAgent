@@ -1,0 +1,28 @@
+# 排除虚拟环境
+.venv/
+
+# 排除 Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 排除 IDE 配置
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 排除 git
+.git/
+.gitignore
+
+# 排除环境文件（敏感信息）
+.env
+
+# 排除本地输出
+output/
+
+# 排除操作系统文件
+.DS_Store
+Thumbs.db

@@ -1,0 +1,38 @@
+# ============================================================
+# ResearchAgent — Docker Compose 部署
+# 用法：
+#   docker compose build     # 构建镜像
+#   docker compose up -d     # 启动服务
+#   docker compose logs -f   # 查看日志
+#   docker compose down      # 停止服务
+# ============================================================
+
+services:
+  research-agent:
+    build: .
+    container_name: research-agent
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      # 报告输出持久化到宿主机的 ./output 目录
+      - ./output:/app/output
+    environment:
+      # 服务配置（可通过 .env 文件覆盖）
+      - TZ=Asia/Shanghai
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import research_agent; print('ok')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M

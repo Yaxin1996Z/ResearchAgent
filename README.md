@@ -100,6 +100,10 @@ cp .env.example .env
 ### 2. 安装
 
 ```bash
+# 方式一：pip（推荐）
+pip install -e .
+
+# 方式二：uv（需预先安装 uv）
 uv sync
 ```
 
@@ -120,6 +124,51 @@ python -m research_agent.main "Agent Memory" --output ./reports
 python -m research_agent.main --interactive
 ```
 
+### 4. Docker 部署（推荐）
+
+```bash
+# 构建镜像（首次构建较慢，需下载基础镜像）
+docker compose build
+
+# 启动服务（FastAPI + 健康检查 + 自动重启）
+docker compose up -d
+
+# 查看启动状态
+docker compose ps
+
+# 查看日志
+docker compose logs -f
+
+# 调用 API
+curl -X POST http://localhost:8000/api/research \
+  -H "Content-Type: application/json" \
+  -d '{"topic": "RAG 技术"}'
+
+# 健康检查
+curl http://localhost:8000/health
+
+# 停止服务
+docker compose down
+```
+
+> **容器化优势**：隔离运行环境、自动重启、资源限制（CPU/Memory）、输出持久化到本地 `./output`
+
+#### 验证步骤
+
+构建并启动后，确认一切正常：
+
+```bash
+# 1. 检查容器状态（应为 Up + healthy）
+docker ps --filter name=research-agent
+
+# 2. 测试健康接口
+curl http://localhost:8000/health
+# 返回: {"status":"ok","service":"ResearchAgent","version":"1.0.0"}
+
+# 3. 访问 API 文档
+open http://localhost:8000/docs
+```
+
 ---
 
 ## 项目结构
@@ -138,6 +187,9 @@ ResearchAgent/
 ├── output/                       # 生成的报告（自动创建）
 ├── .env.example                  # 环境变量模板
 ├── pyproject.toml                # 项目配置
+├── Dockerfile                    # 容器镜像定义（pip + 阿里云镜像加速）
+├── docker-compose.yml            # 容器编排（含资源限制/健康检查）
+├── .dockerignore                 # 容器构建忽略规则
 └── README.md
 ```
 
@@ -224,6 +276,7 @@ $ python -m research_agent.main "MCP 协议"
 - [x] 工具调用系统
 - [x] 三层记忆管理
 - [x] Markdown 报告生成
+- [x] Docker 容器化部署（单阶段构建 + docker-compose + 健康检查 + 资源限制）
 - [ ] MCP 协议集成（Agent 间通信）
 - [ ] 层级管理模式（Manager Agent）
 - [ ] Web 界面（FastAPI + 前端）
@@ -236,5 +289,50 @@ $ python -m research_agent.main "MCP 协议"
 |------|------|
 | Python 3.12 | 运行环境 |
 | DeepSeek API | LLM 推理（OpenAI 兼容） |
-| uv | 包管理 |
+| pip / uv | 包管理（pip 国内镜像加速） |
 | 零框架依赖 | 编排引擎、工具、记忆全部手写 |
+| Docker / Docker Compose | 容器化部署（单阶段构建 + 资源限制 + 健康检查 + 自动重启） |
+
+---
+
+## Docker 容器化设计
+
+### 架构
+
+```
+┌────────────────────────────────────────────┐
+│           Docker 容器 (research-agent)       │
+│                                            │
+│  ┌────────────────┐   ┌─────────────────┐  │
+│  │  uvicorn 服务    │   │  FastAPI 应用     │  │
+│  │  (端口 8000)    │──→│  /api/research  │  │
+│  │                │   │  /health        │  │
+│  │                │   │  /api/reports   │  │
+│  └────────────────┘   └────────┬────────┘  │
+│                                │           │
+│  ┌─────────────────────────────┴─────────┐  │
+│  │      Agent 编排引擎                    │  │
+│  │  Planner → Researcher → Writer → Reviewer │
+│  └─────────────────────────────────────────┘  │
+│                                │              │
+│  ┌─────────────────────────────┴─────────┐   │
+│  │      LLM API 调用 (出站)              │   │
+│  └─────────────────────────────────────────┘  │
+└──────────────────────┬─────────────────────────┘
+                       │
+              ┌────────┴────────┐
+              │  卷挂载: output/  │
+              │  报告持久化       │
+              └─────────────────┘
+```
+
+### 关键设计
+
+| 设计点 | 说明 |
+|--------|------|
+| **单阶段构建** | 基于 `python:3.12-slim`，配置阿里云 PyPI 镜像加速依赖下载 |
+| **资源限制** | CPU 上限 2 核，内存上限 2G，防止 LLM 并发调用打爆宿主机 |
+| **健康检查** | 每 30s 检查一次，失败 3 次自动重启 |
+| **自动重启** | `unless-stopped` 策略，跟随 Docker Daemon 自动拉起 |
+| **输出持久化** | `./output` 目录挂载到容器内，报告不随容器销毁而丢失 |
+| **环境变量** | 通过 `.env` 文件传入 API Key，不硬编码在镜像中 |
