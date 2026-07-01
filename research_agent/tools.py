@@ -69,6 +69,33 @@ def save_file(args: str) -> str:
     return f"文件已保存：{filepath}"
 
 
+@tool(name="web_search", description="搜索互联网，输入搜索关键词，返回搜索结果标题和摘要")
+def web_search(query: str) -> str:
+    """搜索互联网，返回最新信息"""
+    try:
+        from duckduckgo_search import DDGS
+        results = []
+        with DDGS() as ddgs:
+            for r in ddgs.text(query, max_results=5):
+                title = r.get("title", "")
+                body = r.get("body", "")
+                href = r.get("href", "")
+                results.append(f"- {title}\n  {body}\n  {href}")
+        if not results:
+            return "没有找到相关结果。"
+        return "搜索结果：\n" + "\n\n".join(results)
+    except Exception as e:
+        return f"[搜索出错] {e}"
+
+
+@tool(name="query_knowledge", description="从本地知识库中搜索相关内容。知识库已预加载了本地文档，输入问题返回最相关的文档片段，可作为调研参考")
+def query_knowledge(question: str) -> str:
+    """从已加载的本地知识库中检索相关内容"""
+    from .rag import get_knowledge_base
+    kb = get_knowledge_base()
+    return kb.query(question) or "知识库中没有相关内容。"
+
+
 # ============================================================
 # 工具执行器
 # ============================================================

@@ -20,8 +20,8 @@ COPY research_agent/ ./research_agent/
 COPY run.py .
 COPY pyproject.toml .
 
-# 创建输出目录
-RUN mkdir -p /app/output
+# 创建输出目录和 RAG 目录
+RUN mkdir -p /app/output /app/research_agent/rag/rag_db /app/research_agent/rag/repo
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \

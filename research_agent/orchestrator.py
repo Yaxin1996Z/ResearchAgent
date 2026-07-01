@@ -109,24 +109,37 @@ class Crew:
         self._context = ""
 
     def kickoff(self) -> str:
-        """顺序执行所有任务，前一个输出传给后一个"""
+        """顺序执行所有任务，前一个输出传给后一个，但规划结果一直保留"""
         print(f"\n  \U0001f680 启动 {len(self.agents)} 个 Agent，{len(self.tasks)} 个任务\n")
 
         for agent in self.agents:
             print(f"    \U0001f464 {agent.role}")
         print()
 
+        plan_text = ""   # 规划结果，全局保留
         final = ""
         for i, task in enumerate(self.tasks):
             print(f"  \U0001f4cb 任务 {i+1}: {task.description[:50]}...")
-            output = task.execute(context=self._context)
+
+            # 组装上下文：规划（如有）+ 前一个 Agent 的输出
+            full_context = ""
+            if plan_text:
+                full_context += f"【研究计划】\n{plan_text}\n\n"
+            if self._context:
+                full_context += f"【已有成果】\n{self._context}"
+
+            output = task.execute(context=full_context)
             print(f"  ✅ 完成 ({len(output)} 字)")
+
+            # 第一个 Agent（Planner）的输出单独保留
+            if i == 0:
+                plan_text = output
 
             # 研究员任务完成后，将研究成果提取到记忆中
             if self.memory and "研究" in task.agent.role and i >= 1:
                 self._extract_findings(output)
 
-            self._context = output
+            self._context = output   # 只保留上一个 Agent 的输出（精简）
             final = output
 
         return final

@@ -1,6 +1,6 @@
 # ResearchAgent 🧠
 
-> **多 Agent 智能研究助理** —— 输入一个技术主题，4 个 AI 专家协作完成调研、撰写、审核，自动输出结构化 Markdown 报告。
+> **多 Agent 智能研究助理** —— 输入一个研究主题，4 个 AI 专家协作完成调研、撰写、审核，自动输出结构化 Markdown 报告。支持本地知识库 RAG 检索增强生成。
 
 ---
 
@@ -8,17 +8,17 @@
 
 | 维度 | 说明 |
 |------|------|
-| **技术栈** | Python 3.12, OpenAI API (DeepSeek), 手写多 Agent 编排引擎 |
-| **核心能力** | 多角色 Agent 协作、工具调用、层级记忆、Markdown 报告自动生成 |
-| **代码量** | ~500 行，零框架依赖，从底层 LLM 调用到上层编排全部手写 |
-| **简历价值** | 展示 Agent 架构设计能力、工程落地能力、系统思维能力 |
+| **技术栈** | Python 3.12, DeepSeek API, Chroma RAG, Docker Compose |
+| **核心能力** | 多角色 Agent 编排、RAG 知识库检索、工具调用、三层记忆、Docker 部署 |
+| **代码量** | ~600 行核心代码，编排引擎手写零框架依赖 |
+| **简历价值** | 展示 Agent 架构 + RAG 落地 + 工程化部署能力 |
 
 ---
 
 ## 架构
 
 ```
-用户输入 "什么是MCP协议"
+用户输入 "鲁迅笔下的阿Q形象"
         │
         ▼
 ┌─────────────────────────────────────────────┐
@@ -30,23 +30,22 @@
 ┌─────────────────────────────────────────────┐
 │              Researcher Agent                │
 │          (高级技术研究员 - 深度调研)           │
-│              ┌──────────────┐               │
-│              │  工具系统    │               │
-│              │  · 计算器    │               │
-│              │  · 文件操作  │               │
-│              └──────────────┘               │
+│              ┌────────────────────┐         │
+│              │  工具系统(按角色分配)│         │
+│              │  · query_knowledge │         │
+│              │    (RAG 知识库检索) │         │
+│              └────────────────────┘         │
 └──────────────────┬──────────────────────────┘
-                   │ 调研结果
+                   │ 调研结果 + 记忆(Findings)
                    ▼
 ┌─────────────────────────────────────────────┐
 │               Writer Agent                   │
 │         (技术报告撰写专家 - 输出报告)          │
-│              ┌──────────────┐               │
-│              │   记忆系统   │               │
-│              │  · 短期缓冲  │               │
-│              │  · 实体提取  │               │
-│              │  · 研究发现  │               │
-│              └──────────────┘               │
+│              ┌────────────────────┐         │
+│              │  · save_file      │         │
+│              │  · 记忆系统        │         │
+│              │    (Buffer/Entity/Findings)  │
+│              └────────────────────┘         │
 └──────────────────┬──────────────────────────┘
                    │ 报告草稿
                    ▼
@@ -62,26 +61,22 @@
             └──────────────┘
 ```
 
-### 核心组件
+### RAG 知识库
 
-| 模块 | 职责 | 对应文件 |
-|------|------|---------|
-| **Agent** | 角色设定 + 工具 + 记忆，执行具体任务 | `orchestrator.py` |
-| **Task** | 任务单元（描述 + 分配给谁） | `orchestrator.py` |
-| **Crew** | 任务调度器，管理 Agent 执行顺序 | `orchestrator.py` |
-| **Tool Executor** | 工具注册、调用、结果回送 | `tools.py` |
-| **ResearchMemory** | 三层记忆（Buffer + Entity + Findings） | `memory.py` |
-| **LLM Client** | API 调用封装，支持多 Provider | `llm.py` |
-| **Report** | Markdown 报告生成与持久化 | `report.py` |
+支持本地文档语义检索，启动时自动加载 `rag/repo/` 下的 `.md` / `.txt` 文件，分块后经 bge-small-zh 模型 embedding 存入 Chroma 向量库。
 
-### Agent 角色
+- **匹配机制**：研究主题与知识库内容（鲁迅/毛泽东/白鹿原等）匹配时才注册检索工具，避免无效调用
+- **持久化**：Chroma 索引落盘到 `rag/rag_db/`，重复启动复用，无需重新 embedding
+- **回退机制**：Docker 环境无 torch 时自动使用 ONNX 轻量模型
 
-| Agent | 角色 | 目标 |
-|-------|------|------|
-| 🗂️ **Planner** | 研究规划专家 | 分析需求，制定研究计划 |
-| 🔬 **Researcher** | 高级技术研究员 | 深度调研，收集信息 |
-| ✍️ **Writer** | 技术报告撰写专家 | 将调研结果写成结构化报告 |
-| ✅ **Reviewer** | 技术审核专家 | 审核质量，输出改进版 |
+### 工具分配
+
+| Agent | 可用工具 | 说明 |
+|-------|---------|------|
+| 🗂️ Planner | 无 | 仅做规划，不需要工具 |
+| 🔬 Researcher | query_knowledge | 按主题匹配注册 |
+| ✍️ Writer | save_file | 保存报告 |
+| ✅ Reviewer | 无 | 仅做审核 |
 
 ---
 
@@ -90,83 +85,94 @@
 ### 1. 配置
 
 ```bash
-# 复制环境变量模板
 cp .env.example .env
-
-# 编辑 .env，填入你的 API Key
-# 默认使用 DeepSeek（OpenAI 兼容）
+# 编辑 .env，填入 DeepSeek API Key
 ```
 
 ### 2. 安装
 
 ```bash
-# 方式一：pip（推荐）
 pip install -e .
-
-# 方式二：uv（需预先安装 uv）
-uv sync
+# 或 uv sync
 ```
 
 ### 3. 使用
 
 ```bash
-# 命令行模式
-python -m research_agent.main "你的研究主题"
+# CLI 模式
+python -m research_agent.main "鲁迅笔下的阿Q形象"
 
-# 示例
-python -m research_agent.main "RAG 技术"
-python -m research_agent.main "MCP 协议"
+# 指定知识库目录
+python -m research_agent.main "白鹿原" --kb-path ./my_docs
 
-# 指定输出目录
-python -m research_agent.main "Agent Memory" --output ./reports
+# 重建知识库索引
+python -m research_agent.main --rebuild
 
 # 交互模式
 python -m research_agent.main --interactive
 ```
 
-### 4. Docker 部署（推荐）
+### 4. Docker 部署
 
 ```bash
-# 构建镜像（首次构建较慢，需下载基础镜像）
+# 构建镜像
 docker compose build
 
-# 启动服务（FastAPI + 健康检查 + 自动重启）
+# 启动服务
 docker compose up -d
 
-# 查看启动状态
-docker compose ps
-
-# 查看日志
-docker compose logs -f
+# 重建知识库（首次或更新文档后）
+docker compose exec research-agent python -m research_agent.main --rebuild
 
 # 调用 API
 curl -X POST http://localhost:8000/api/research \
   -H "Content-Type: application/json" \
-  -d '{"topic": "RAG 技术"}'
+  -d '{"topic": "毛泽东的早期经历"}'
 
-# 健康检查
-curl http://localhost:8000/health
-
-# 停止服务
-docker compose down
+# 查看日志
+docker compose logs -f
 ```
 
-> **容器化优势**：隔离运行环境、自动重启、资源限制（CPU/Memory）、输出持久化到本地 `./output`
-
-#### 验证步骤
-
-构建并启动后，确认一切正常：
+### 运行效果
 
 ```bash
-# 1. 检查容器状态（应为 Up + healthy）
-docker ps --filter name=research-agent
+# 重建知识库：1760 个片段，约 5 分钟
+$ docker compose exec research-agent python -m research_agent.main --rebuild
+Loading weights: 100%|█████████████████████████████████████████████████████████████████████████████| 71/71 [00:00<00:00, 176.69it/s]
+  📄 《毛泽东传》（罗斯.特里尔版）.txt: 436 个片段，正在 embedding...
+     ✅ 179 秒
+  📄 《白鹿原》全集.txt: 587 个片段，正在 embedding...
+     ✅ 218 秒
+  📄 鲁迅全集.txt: 737 个片段，正在 embedding...
+     ✅ 264 秒
+  📚 知识库加载完成：1760 个片段（共 662 秒）
+  ✅ 知识库已重建，共 1760 个片段
 
-# 2. 测试健康接口
-curl http://localhost:8000/health
-# 返回: {"status":"ok","service":"ResearchAgent","version":"1.0.0"}
+# 提交研究任务，RAG 自动检索鲁迅全集
+$ curl -X POST http://localhost:8000/api/research \
+  -H "Content-Type: application/json" \
+  -d '{"topic": "鲁迅的阿Q精神研究"}'
 
-# 3. 访问 API 文档
-open http://localhost:8000/docs
+📚 知识库已加载：1760 个片段
+📚 主题与知识库匹配，已注册检索工具
+🚀 启动 4 个 Agent，4 个任务
+
+📋 任务 1: 分析研究主题「鲁迅的阿Q精神研究」，制定研究计划...
+  🤖 [研究规划专家] 处理中...  ✅ 完成 (1909 字)
+
+📋 任务 2: 执行研究计划，调研主题「鲁迅的阿Q精神研究」...
+  🤖 [高级技术研究员] 处理中...
+    🔧 调工具 -> [1] 来源：鲁迅全集.txt（相似度：0.582）
+    胜利的悲哀。然而我们的阿Q却没有这样乏，他是...
+  ✅ 完成 (4113 字)  [记忆] 提取 5 条关键发现
+
+📋 任务 3: 撰写完整的技术报告...
+  🤖 [技术报告撰写专家] 处理中...  ✅ 完成 (8361 字)
+
+📋 任务 4: 审核并改进技术报告...
+  🤖 [技术审核专家] 处理中...  ✅ 完成 (9887 字)
+
+✅ 研究完成！报告已保存：output/20260701_1141_鲁迅的阿Q精神研究.md
 ```
 
 ---
@@ -175,111 +181,77 @@ open http://localhost:8000/docs
 
 ```
 ResearchAgent/
-├── research_agent/               # 核心包
-│   ├── __init__.py               # 包信息
-│   ├── main.py                   # CLI 入口
+├── research_agent/
+│   ├── __init__.py
+│   ├── main.py                   # CLI入口 + 工具分配
 │   ├── orchestrator.py           # Agent / Task / Crew 编排引擎
 │   ├── agents.py                 # Agent 角色定义
-│   ├── tools.py                  # 工具系统（注册 + 执行）
-│   ├── memory.py                 # 三层记忆管理
+│   ├── tools.py                  # 工具系统（@tool + ToolExecutor）
+│   ├── memory.py                 # 三层记忆（Buffer / Entity / Findings）
 │   ├── llm.py                    # LLM API 封装
-│   └── report.py                 # 报告生成与保存
-├── output/                       # 生成的报告（自动创建）
-├── .env.example                  # 环境变量模板
-├── pyproject.toml                # 项目配置
-├── Dockerfile                    # 容器镜像定义（pip + 阿里云镜像加速）
-├── docker-compose.yml            # 容器编排（含资源限制/健康检查）
-├── .dockerignore                 # 容器构建忽略规则
+│   ├── report.py                 # 报告生成与保存
+│   ├── rag/                      # RAG 知识库模块
+│   │   ├── __init__.py
+│   │   ├── config.toml           # 模型路径、目录配置
+│   │   ├── knowledge.py          # 文档加载 + Chroma 检索
+│   │   ├── repo/                 # 知识库文档（.md/.txt）
+│   │   └── rag_db/               # Chroma 持久化索引（自动生成）
+│   └── api.py                    # FastAPI 服务
+├── output/                       # 生成的报告
+├── Dockerfile
+├── docker-compose.yml            # 含 rag_data 卷挂载
+├── pyproject.toml
 └── README.md
 ```
 
 ---
 
+## Docker 部署设计
+
+### 卷挂载
+
+| 卷 | 宿主机 | 容器内 | 作用 |
+|----|--------|--------|------|
+| **bind** | `./output` | `/app/output` | 报告持久化 |
+| **named** | `rag_data` | `/app/research_agent/rag/rag_db` | 向量索引持久化 |
+| **bind** | `./rag/repo` | `/app/research_agent/rag/repo` | 文档同步 |
+| **bind** | `~/.cache` | `/root/.cache` | bge 模型共享 |
+
+### 资源限制
+
+- CPU 上限 2 核，内存上限 2G
+- 健康检查 30s 间隔，3 次失败自动重启
+- 自动重启策略 `unless-stopped`
+
+---
+
 ## 设计理念
 
-### 为什么手写？
+### 为什么手写编排引擎
 
 | 方案 | 优点 | 缺点 |
 |------|------|------|
-| **CrewAI 框架** | 开箱即用 | 黑盒、Python 版本限制、难排查 |
-| **手写编排引擎** | 完全可控、零依赖、可讲清原理 | 代码量稍多 |
-
-**结论**：理解原理后可以用框架提效，但这个项目手写是为了展示对 Agent 架构的深入理解。
-
-### Agent 协作模式
-
-```
-Sequential Pipeline（顺序流水线）：
-  Planner → Researcher → Writer → Reviewer
-
-  每个 Agent 接收前一个的输出作为上下文，
-  在自己的角色范围内完成工作后传递给下一个。
-```
-
-### 工具调用
-
-```
-LLM 输出："TOOL_CALL: calculator | 235 * 47"
-          ↓
-  解析 → 执行 Python 函数 → 结果送回 LLM → 继续回答
-```
+| CrewAI | 开箱即用 | 黑盒、难排查、面试讲不清原理 |
+| LangGraph | 状态机灵活 | 学习成本高、抽象层厚 |
+| **手写** | 完全可控、零依赖 | 需要造轮子 |
 
 ### 记忆系统
 
 | 层次 | 作用 |
 |------|------|
-| Entity Memory | 从对话中提取关键实体 |
-| Findings | 研究发现的关键事实列表 |
-| CircularBuffer | 保留最近 N 轮对话 |
-
----
-
-## 运行示例
-
-```
-$ python -m research_agent.main "MCP 协议"
-
-============================================================
-  ResearchAgent v1.0.0
-  研究主题：MCP 协议
-============================================================
-
-  🚀 启动 4 个 Agent，4 个任务
-
-  📋 任务 1: 分析研究主题「MCP协议」，制定研究计划...
-  🤖 [研究规划专家] 处理中...
-  ✅ 完成 (1861 字)
-
-  📋 任务 2: 执行研究计划，调研主题「MCP协议」...
-  🤖 [高级技术研究员] 处理中...
-  ✅ 完成 (6009 字)
-
-  📋 任务 3: 撰写完整的技术报告...
-  🤖 [技术报告撰写专家] 处理中...
-  ✅ 完成 (6715 字)
-
-  📋 任务 4: 审核并改进技术报告...
-  🤖 [技术审核专家] 处理中...
-  ✅ 完成 (7860 字)
-
-============================================================
-  ✅ 研究完成！报告已保存：
-  📄 ./output/20260609_1513_什么是MCP协议.md
-============================================================
-```
+| Buffer | 短期对话缓存，CircularBuffer 自动丢弃 |
+| Entity | 实体提取（人名/术语/概念） |
+| Findings | 研究发现持久化，跨 Agent 传递关键信息 |
 
 ---
 
 ## 路线图
 
 - [x] 多 Agent 顺序编排
-- [x] 工具调用系统
+- [x] 工具调用系统 + 按角色分配
 - [x] 三层记忆管理
-- [x] Markdown 报告生成
-- [x] Docker 容器化部署（单阶段构建 + docker-compose + 健康检查 + 资源限制）
-- [ ] MCP 协议集成（Agent 间通信）
-- [ ] 层级管理模式（Manager Agent）
-- [ ] Web 界面（FastAPI + 前端）
+- [x] RAG 知识库（Chroma + bge 本地模型）
+- [x] Docker 容器化部署
 
 ---
 
@@ -288,51 +260,7 @@ $ python -m research_agent.main "MCP 协议"
 | 技术 | 用途 |
 |------|------|
 | Python 3.12 | 运行环境 |
-| DeepSeek API | LLM 推理（OpenAI 兼容） |
-| pip / uv | 包管理（pip 国内镜像加速） |
+| DeepSeek API | LLM 推理 |
+| Chroma + bge-small-zh | RAG 知识库向量检索 |
+| Docker / Compose | 容器化部署 |
 | 零框架依赖 | 编排引擎、工具、记忆全部手写 |
-| Docker / Docker Compose | 容器化部署（单阶段构建 + 资源限制 + 健康检查 + 自动重启） |
-
----
-
-## Docker 容器化设计
-
-### 架构
-
-```
-┌────────────────────────────────────────────┐
-│           Docker 容器 (research-agent)       │
-│                                            │
-│  ┌────────────────┐   ┌─────────────────┐  │
-│  │  uvicorn 服务    │   │  FastAPI 应用     │  │
-│  │  (端口 8000)    │──→│  /api/research  │  │
-│  │                │   │  /health        │  │
-│  │                │   │  /api/reports   │  │
-│  └────────────────┘   └────────┬────────┘  │
-│                                │           │
-│  ┌─────────────────────────────┴─────────┐  │
-│  │      Agent 编排引擎                    │  │
-│  │  Planner → Researcher → Writer → Reviewer │
-│  └─────────────────────────────────────────┘  │
-│                                │              │
-│  ┌─────────────────────────────┴─────────┐   │
-│  │      LLM API 调用 (出站)              │   │
-│  └─────────────────────────────────────────┘  │
-└──────────────────────┬─────────────────────────┘
-                       │
-              ┌────────┴────────┐
-              │  卷挂载: output/  │
-              │  报告持久化       │
-              └─────────────────┘
-```
-
-### 关键设计
-
-| 设计点 | 说明 |
-|--------|------|
-| **单阶段构建** | 基于 `python:3.12-slim`，配置阿里云 PyPI 镜像加速依赖下载 |
-| **资源限制** | CPU 上限 2 核，内存上限 2G，防止 LLM 并发调用打爆宿主机 |
-| **健康检查** | 每 30s 检查一次，失败 3 次自动重启 |
-| **自动重启** | `unless-stopped` 策略，跟随 Docker Daemon 自动拉起 |
-| **输出持久化** | `./output` 目录挂载到容器内，报告不随容器销毁而丢失 |
-| **环境变量** | 通过 `.env` 文件传入 API Key，不硬编码在镜像中 |

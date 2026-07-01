@@ -1,7 +1,17 @@
+# Python
 .venv/
 __pycache__/
 *.pyc
+
+# 环境配置
 .env
+
+# 输出报告
 output/
 reports/
-output/
+
+# Chroma 向量库（自动生成）
+research_agent/rag/rag_db/
+
+# 旧版 Chroma（清理前残留）
+chroma_db/
